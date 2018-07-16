@@ -1,0 +1,208 @@
+/**
+ *
+ *  Copyright 2016 Maciej
+ *
+ *  Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except
+ *  in compliance with the License. You may obtain a copy of the License at:
+ *
+ *      http://www.apache.org/licenses/LICENSE-2.0
+ *
+ *  Unless required by applicable law or agreed to in writing, software distributed under the License is distributed
+ *  on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the License
+ *  for the specific language governing permissions and limitations under the License.
+ *
+ */
+
+definition(
+    name: "SmartThings logs to Azure",
+    namespace: "SmartThings Labs",
+    author: "Maciej G",
+    description: "Smartthings Azure Event Hub Integration",
+    category: "My Apps",
+    iconUrl: "https://s3.amazonaws.com/smartapp-icons/Convenience/Cat-Convenience.png",
+    iconX2Url: "https://s3.amazonaws.com/smartapp-icons/Convenience/Cat-Convenience@2x.png",
+    iconX3Url: "https://s3.amazonaws.com/smartapp-icons/Convenience/Cat-Convenience@2x.png") {
+    appSetting "EventHubSecret"
+    appSetting "EventHubURL"
+}
+
+preferences {
+    section("Environment") {
+        input "temperatures", "capability.temperatureMeasurement", title: "Temperature Sensors", multiple: true
+        input "humidity", "capability.relativeHumidityMeasurement", title: "Humidity Sensors", multiple: true
+                   }
+    section("Media") {
+       input "mediaControllers", "capability.mediaController", title: "Media", multiple: true
+       input "musicPlayers", "capability.musicPlayer", title: "Music", multiple: true
+                       }
+    section("Security Sensors") {
+        input "motions", "capability.motionSensor", title: "Motion Sensors", multiple: true
+        input "accelerations", "capability.accelerationSensor", title: "Acceleration Sensors", multiple: true
+        input "contacts", "capability.contactSensor", title: "Contact Sensors", multiple: true
+                 }
+    section("Switches") {
+        input "switches", "capability.switch", title: "Switches", multiple: true
+            }
+    section("Lights") {
+        input "illuminances", "capability.illuminanceMeasurement", title: "illuminanceMeasurement", multiple: true
+        input "colorTemperatures", "capability.colorTemperature", title: "colorTemperature", multiple: true
+    }
+     section("Diagnostics") {
+        input "battery", "capability.battery", title: "battery", multiple: true
+        input "presences", "capability.presenceSensor", title: "Presence", multiple: true
+        input "configurations", "capability.configuration", title: "Configuration", multiple: true
+       // input "consumable", "capability.consumable", title: "consumable", multiple: true
+        
+    }
+}
+
+def installed() {
+	log.debug "Installed with settings: ${settings}"
+	
+	initialize()
+}
+
+def updated() {
+	log.debug "Updated with settings: ${settings}"
+
+	unsubscribe()
+	initialize()
+}
+
+def initialize() {
+    
+    subscribe(temperatures, "temperature", temperatureHandler)
+    subscribe(motions, "motion", motionHandler)
+    subscribe(contacts, "contact", contactSensorHandler)
+    subscribe(switches, "switch", switchHandler)
+    subscribe(illuminances, "illuminance", illuminanceMeasurementHandler)
+    subscribe(batteries, "battery", batteryHandler)
+    subscribe(presences, "presence", presenceHandler)
+    subscribe(colorTemperatures, "colorTemperature", colorTemperatureHandler)
+    subscribe(mediaControllers, "mediaController", mediaControllerHandler)
+    subscribe(musicPlayers, "mute", musicPlayerHandler)
+    subscribe(musicPlayers, "level", musicPlayerHandler)
+    subscribe(musicPlayers, "trackData", musicPlayerHandler)
+    subscribe(musicPlayers, "trackDescription", musicPlayerTDHandler)
+    subscribe(accelerations, "acceleration", accelerationSensorHandler)
+    subscribe(humidity, "humidity", relativeHumidityMeasurementHandler)
+    subscribe(location, "sunset", sunsetHandler)
+    subscribe(location, "sunrise", sunriseHandler)
+   
+   
+   // subscribe(consumable, "consumable", consumableHandler)
+    
+}
+
+def sendEvent(sensorId, sensorName, sensorType, value) {
+    log.debug "sending ${sensorId} at ${value}"
+    def cleanedSensorId = sensorId.replace(" ", "")
+    def params = [
+        uri: "${appSettings.EventHubURL}",
+        body: "{ sensorId : \"${cleanedSensorId}\", sensorName : \"${sensorName}\", sensorType : \"${sensorType}\", value : \"${value}\" }",
+        contentType: "application/xml; charset=utf-8",
+        requestContentType: "application/atom+xml;type=entry;charset=utf-8",
+        headers: ["Authorization": "${appSettings.EventHubSecret}"],
+    ]
+
+	try {
+        httpPost(params) { resp -> 
+            log.debug "response message ${resp}"
+        }
+    } catch (e) {
+        // For some reason SmartThings treats 200 as an error response, so we need to comment this out to avoid errors. Uncomment the line below to debug errors 
+        log.error "something went wrong: $e"
+    }
+}
+
+
+def temperatureHandler(evt) {    
+    sendEvent(evt.displayName, evt.displayName, 'temperature', evt.value)
+}
+
+def relativeHumidityMeasurementHandler(evt) {    
+    sendEvent(evt.displayName, evt.displayName, 'humidity', evt.value)
+}
+
+def motionHandler(evt) {
+    if (evt.value == 'active') {
+        sendEvent(evt.displayName + 'motion', evt.displayName, 'motion', 'motion detected')
+    }
+    if (evt.value == 'inactive') {
+        sendEvent(evt.displayName + 'motion', evt.displayName, 'motion', 'no motion detected')
+    }
+}
+
+def contactSensorHandler(evt) {
+    if (evt.value == 'open') {
+        sendEvent(evt.displayName, evt.displayName, 'contact', 'open')
+    }
+    if (evt.value == 'closed') {
+        sendEvent(evt.displayName, evt.displayName, 'contact', 'closed')
+    }
+}
+
+def switchHandler(evt) {
+    if (evt.value == "on") {
+        sendEvent(evt.displayName, evt.displayName, 'switch', 'on')
+    } else if (evt.value == "off") {
+        sendEvent(evt.displayName, evt.displayName, 'switch', 'off')
+    }
+}
+
+def illuminanceMeasurementHandler(evt) {
+    sendEvent(evt.displayName, evt.displayName, 'illuminanceMeasurement', evt.value)
+}
+
+def batteryHandler(evt) {    
+    sendEvent(evt.displayName, evt.displayName, 'battery', evt.value)
+}
+def presenceHandler(evt) {
+    if (evt.value == 'present') {
+        sendEvent(evt.displayName, evt.displayName, 'presence', 'came back')
+    }
+    if (evt.value == 'not present') {
+        sendEvent(evt.displayName, evt.displayName, 'presence', 'left')
+  }
+}
+def colorTemperatureHandler(evt) {    
+    sendEvent(evt.displayName, evt.displayName,'colorTemperature', evt.value)
+}
+
+def musicPlayerHandler(evt) {
+		    if (evt.value == 'muted') {
+        sendEvent(evt.displayName, evt.displayName, 'muted', 'muted')
+    }
+    	if (evt.value == 'unmuted') {
+        sendEvent(evt.displayName, evt.displayName, 'unmuted', 'unmuted')
+    }
+    else {
+		sendEvent(evt.displayName, evt.displayName,'Sonos', evt.value)
+        } 
+}
+
+def musicPlayerTDHandler(evt) {    
+    sendEvent(evt.displayName, evt.displayName, 'track', evt.value)
+}
+def mediaControllerHandler(evt) {    
+    sendEvent(evt.displayName)
+    }
+
+//def consumableHandler(evt) {    
+//    sendEvent(evt.displayName)
+//}
+def accelerationSensorHandler(evt) {    
+        if (evt.value == 'active') {
+        sendEvent(evt.displayName, evt.displayName, 'acceleration', evt.value)
+    }
+    if (evt.value == 'inactive') {
+        sendEvent(evt.displayName, evt.displayName, 'no acceleration', evt.value)
+    }
+}
+def sunsetHandler(evt) {
+    sendEvent('Sunset','Sunset','Sunset','Sunset',)
+}
+
+def sunriseHandler(evt) {
+    sendEvent('Sunrise', 'Sunrise', 'Sunrise', 'Sunrise')
+}
